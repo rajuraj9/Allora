@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { TaskResult } from "@/lib/types";
 
 interface ResultDisplayProps {
@@ -7,23 +8,20 @@ interface ResultDisplayProps {
   taskId: string;
 }
 
-// Strip markdown fences and parse JSON from LLM output
+// ── Data cleaning ─────────────────────────────────────────────────
+
 function parseCleanData(raw: unknown): unknown {
   if (typeof raw !== "string") return raw;
-  const stripped = raw
-    .replace(/^```(?:json)?\s*/i, "")
-    .replace(/\s*```\s*$/, "")
-    .trim();
+  const stripped = raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```\s*$/, "").trim();
   try { return JSON.parse(stripped); } catch { return stripped; }
 }
 
 function cleanExtractedData(data: Record<string, unknown>): Record<string, unknown> {
   const cleaned: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(data)) {
-    if (k.startsWith("_")) continue; // skip internal keys like _streaming_url
+    if (k.startsWith("_")) continue;
     cleaned[k] = parseCleanData(v);
   }
-  // If there's a "result" key that's a string with JSON, unwrap it
   if (cleaned.result && typeof cleaned.result === "string") {
     const parsed = parseCleanData(cleaned.result);
     if (typeof parsed === "object" && parsed !== null) return parsed as Record<string, unknown>;
@@ -31,11 +29,12 @@ function cleanExtractedData(data: Record<string, unknown>): Record<string, unkno
   return cleaned;
 }
 
+// ── Downloads ─────────────────────────────────────────────────────
+
 function downloadJSON(data: unknown, filename: string) {
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
   const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url; a.download = filename; a.click();
+  const a = document.createElement("a"); a.href = url; a.download = filename; a.click();
   URL.revokeObjectURL(url);
 }
 
@@ -49,178 +48,137 @@ function downloadCSV(data: unknown, filename: string) {
   }
   if (!rows.length) return downloadJSON(data, filename.replace(".csv", ".json"));
   const headers = Object.keys(rows[0]);
-  const csv = [
-    headers.join(","),
-    ...rows.map((r) => headers.map((h) => JSON.stringify(r[h] ?? "")).join(","))
-  ].join("\n");
+  const csv = [headers.join(","), ...rows.map((r) => headers.map((h) => JSON.stringify(r[h] ?? "")).join(","))].join("\n");
   const blob = new Blob([csv], { type: "text/csv" });
   const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url; a.download = filename; a.click();
+  const a = document.createElement("a"); a.href = url; a.download = filename; a.click();
   URL.revokeObjectURL(url);
 }
 
 function downloadHTML(data: Record<string, unknown>, summary: string, filename: string) {
   const now = new Date().toLocaleString();
 
-  function renderValue(v: unknown): string {
-    if (v === null || v === undefined) return `<span style="color:#9ca3af">—</span>`;
-    if (typeof v === "boolean") return v
-      ? `<span style="color:#16a34a;font-weight:600">✓ Yes</span>`
-      : `<span style="color:#dc2626;font-weight:600">✗ No</span>`;
-    if (typeof v === "string" && v.startsWith("http"))
-      return `<a href="${v}" target="_blank" style="color:#2563eb;text-decoration:underline;word-break:break-all">${v}</a>`;
+  function rv(v: unknown): string {
+    if (v === null || v === undefined) return `<span style="color:#6b7280">—</span>`;
+    if (typeof v === "boolean") return v ? `<span style="color:#4ade80">✓ Yes</span>` : `<span style="color:#f87171">✗ No</span>`;
+    if (typeof v === "string" && v.startsWith("http")) return `<a href="${v}" target="_blank" style="color:#60a5fa;text-decoration:underline;word-break:break-all">${v}</a>`;
     if (Array.isArray(v)) {
-      if (!v.length) return `<span style="color:#9ca3af">—</span>`;
-      if (typeof v[0] === "string")
-        return v.map((s) => `<span style="background:#f3f4f6;border:1px solid #e5e7eb;border-radius:999px;padding:2px 10px;font-size:12px;color:#374151">${s}</span>`).join(" ");
-      return `<pre style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;padding:12px;font-size:12px;overflow:auto">${JSON.stringify(v, null, 2)}</pre>`;
+      if (!v.length) return `<span style="color:#6b7280">—</span>`;
+      if (typeof v[0] === "string") return v.map((s) => `<span style="background:#1f2937;border:1px solid #374151;border-radius:999px;padding:2px 10px;font-size:11px;color:#d1d5db">${s}</span>`).join(" ");
+      return `<pre style="background:#111827;border:1px solid #374151;border-radius:6px;padding:10px;font-size:11px;color:#d1d5db;overflow:auto">${JSON.stringify(v, null, 2)}</pre>`;
     }
-    if (typeof v === "object")
-      return `<pre style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;padding:12px;font-size:12px;overflow:auto">${JSON.stringify(v, null, 2)}</pre>`;
-    return `<span style="color:#111827">${String(v)}</span>`;
+    if (typeof v === "object") return `<pre style="background:#111827;border:1px solid #374151;border-radius:6px;padding:10px;font-size:11px;color:#d1d5db;overflow:auto">${JSON.stringify(v, null, 2)}</pre>`;
+    return `<span style="color:#f9fafb">${String(v)}</span>`;
   }
 
-  function renderTable(rows: Record<string, unknown>[]): string {
-    if (!rows.length) return "";
-    const headers = Object.keys(rows[0]);
-    const ths = headers.map((h) => `<th style="text-align:left;padding:10px 16px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#6b7280;background:#f9fafb;border-bottom:2px solid #e5e7eb;white-space:nowrap">${h.replace(/_/g, " ")}</th>`).join("");
-    const trs = rows.map((row, i) =>
-      `<tr style="background:${i % 2 === 0 ? "#fff" : "#f9fafb"};border-bottom:1px solid #f3f4f6">
-        ${headers.map((h) => `<td style="padding:10px 16px;vertical-align:top;font-size:13px">${renderValue(row[h])}</td>`).join("")}
-      </tr>`
-    ).join("");
-    return `<div style="overflow-x:auto;border-radius:12px;border:1px solid #e5e7eb;margin-top:8px">
-      <table style="width:100%;border-collapse:collapse"><thead><tr>${ths}</tr></thead><tbody>${trs}</tbody></table>
-    </div>`;
-  }
+  const entries = Object.entries(data);
+  const arrayEntries = entries.filter(([, v]) => Array.isArray(v) && (v as unknown[]).length > 0);
+  const scalarEntries = entries.filter(([, v]) => !Array.isArray(v) && typeof v !== "object");
 
-  function renderSection(key: string, value: unknown): string {
-    const label = key.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
-    if (Array.isArray(value) && value.length > 0 && typeof value[0] === "object") {
-      return `<section style="margin-bottom:32px">
-        <h2 style="font-size:15px;font-weight:700;color:#111827;margin:0 0 4px">${label}</h2>
-        <p style="font-size:12px;color:#6b7280;margin:0 0 8px">${value.length} result${value.length !== 1 ? "s" : ""}</p>
-        ${renderTable(value as Record<string, unknown>[])}
-      </section>`;
-    }
-    return `<div style="background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:16px;margin-bottom:12px">
-      <p style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#9ca3af;margin:0 0 6px">${label}</p>
-      <div style="font-size:14px;color:#111827">${renderValue(value)}</div>
-    </div>`;
-  }
+  const scalarRows = scalarEntries.map(([k, v]) =>
+    `<tr style="border-bottom:1px solid #1f2937">
+      <td style="padding:12px 16px;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:#6b7280;white-space:nowrap;width:180px">${k.replace(/_/g, " ")}</td>
+      <td style="padding:12px 16px;font-size:13px">${rv(v)}</td>
+    </tr>`
+  ).join("");
 
-  const scalarEntries = Object.entries(data).filter(([, v]) => !Array.isArray(v) && typeof v !== "object");
-  const arrayEntries = Object.entries(data).filter(([, v]) => Array.isArray(v));
-  const objectEntries = Object.entries(data).filter(([, v]) => !Array.isArray(v) && typeof v === "object" && v !== null);
-
-  const scalarGrid = scalarEntries.length > 0
-    ? `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px;margin-bottom:32px">
-        ${scalarEntries.map(([k, v]) => renderSection(k, v)).join("")}
-      </div>`
-    : "";
-
-  const html = `<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Allora AI — Results</title>
-<style>
-  *{box-sizing:border-box}
-  body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#f9fafb;color:#111827;margin:0;padding:0}
-  a{color:#2563eb}
-</style>
-</head>
-<body>
-<div style="max-width:960px;margin:0 auto;padding:40px 24px">
-  <!-- Header -->
-  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:32px;padding-bottom:24px;border-bottom:2px solid #e5e7eb">
-    <div style="display:flex;align-items:center;gap:12px">
-      <div style="width:36px;height:36px;background:#111827;border-radius:8px;display:flex;align-items:center;justify-content:center;color:#fff;font-size:16px">✦</div>
-      <div>
-        <h1 style="font-size:20px;font-weight:800;color:#111827;margin:0">Allora AI</h1>
-        <p style="font-size:12px;color:#6b7280;margin:0">Autonomous Web Agent</p>
+  const arrayTables = arrayEntries.map(([k, v]) => {
+    const rows = v as Record<string, unknown>[];
+    const headers = Object.keys(rows[0] ?? {});
+    const ths = headers.map((h) => `<th style="text-align:left;padding:10px 16px;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:#6b7280;background:#111827;border-bottom:1px solid #374151;white-space:nowrap">${h.replace(/_/g, " ")}</th>`).join("");
+    const trs = rows.map((row, i) => `<tr style="border-bottom:1px solid #1f2937;background:${i % 2 === 0 ? "#0d1117" : "#111827"}">${headers.map((h) => `<td style="padding:10px 16px;font-size:13px;vertical-align:top">${rv(row[h])}</td>`).join("")}</tr>`).join("");
+    return `<div style="margin-bottom:32px">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+        <h2 style="font-size:13px;font-weight:700;color:#f9fafb;margin:0">${k.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())}</h2>
+        <span style="background:#1f2937;border:1px solid #374151;border-radius:999px;padding:1px 8px;font-size:11px;color:#9ca3af">${rows.length}</span>
       </div>
+      <div style="border:1px solid #374151;border-radius:8px;overflow:hidden">
+        <table style="width:100%;border-collapse:collapse"><thead><tr>${ths}</tr></thead><tbody>${trs}</tbody></table>
+      </div>
+    </div>`;
+  }).join("");
+
+  const html = `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Allora AI Report</title></head>
+<body style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#0d1117;color:#f9fafb;margin:0;padding:0">
+<div style="max-width:1000px;margin:0 auto;padding:40px 24px">
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:32px;padding-bottom:20px;border-bottom:1px solid #21262d">
+    <div style="display:flex;align-items:center;gap:10px">
+      <div style="width:32px;height:32px;background:#f9fafb;border-radius:8px;display:flex;align-items:center;justify-content:center;color:#0d1117;font-size:14px;font-weight:900">✦</div>
+      <span style="font-size:16px;font-weight:800;color:#f9fafb">Allora AI</span>
     </div>
-    <div style="text-align:right">
-      <p style="font-size:12px;color:#6b7280;margin:0">Generated</p>
-      <p style="font-size:13px;font-weight:600;color:#374151;margin:0">${now}</p>
-    </div>
+    <span style="font-size:12px;color:#6b7280">${now}</span>
   </div>
-
-  <!-- Summary -->
-  <div style="background:#ecfdf5;border:1px solid #bbf7d0;border-radius:12px;padding:16px 20px;margin-bottom:32px;display:flex;align-items:center;gap:12px">
-    <span style="font-size:20px">✅</span>
-    <p style="font-size:14px;color:#166534;font-weight:500;margin:0">${summary}</p>
+  <div style="background:#1a2332;border:1px solid #2d6a4f;border-radius:8px;padding:14px 18px;margin-bottom:28px;display:flex;align-items:center;gap:10px">
+    <span style="color:#4ade80;font-size:16px">✓</span>
+    <span style="font-size:13px;color:#86efac;font-weight:500">${summary}</span>
   </div>
-
-  <!-- Scalar cards grid -->
-  ${scalarGrid}
-
-  <!-- Array tables -->
-  ${arrayEntries.map(([k, v]) => renderSection(k, v)).join("")}
-
-  <!-- Object sections -->
-  ${objectEntries.map(([k, v]) => renderSection(k, v)).join("")}
-
-  <!-- Footer -->
-  <div style="margin-top:48px;padding-top:24px;border-top:1px solid #e5e7eb;text-align:center">
-    <p style="font-size:12px;color:#9ca3af">Generated by <strong>Allora AI</strong> · alloraai.vercel.app</p>
+  ${scalarEntries.length > 0 ? `<div style="border:1px solid #21262d;border-radius:8px;overflow:hidden;margin-bottom:28px"><table style="width:100%;border-collapse:collapse">${scalarRows}</table></div>` : ""}
+  ${arrayTables}
+  <div style="margin-top:40px;padding-top:20px;border-top:1px solid #21262d;text-align:center">
+    <p style="font-size:11px;color:#6b7280;margin:0">Generated by <strong style="color:#9ca3af">Allora AI</strong></p>
   </div>
-</div>
-</body>
-</html>`;
+</div></body></html>`;
 
   const blob = new Blob([html], { type: "text/html" });
   const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url; a.download = filename; a.click();
+  const a = document.createElement("a"); a.href = url; a.download = filename; a.click();
   URL.revokeObjectURL(url);
 }
 
-// Render a single value nicely
-function ValueCell({ value }: { value: unknown }) {
-  if (value === null || value === undefined) return <span className="text-zinc-400 italic">—</span>;
-  if (typeof value === "boolean") return <span className={value ? "text-green-600" : "text-red-500"}>{value ? "Yes" : "No"}</span>;
+// ── Inline renderers ──────────────────────────────────────────────
+
+function InlineValue({ value }: { value: unknown }) {
+  if (value === null || value === undefined) return <span className="text-zinc-600">—</span>;
+  if (typeof value === "boolean") return <span className={value ? "text-green-400" : "text-red-400"}>{value ? "✓ Yes" : "✗ No"}</span>;
+  if (typeof value === "string" && value.startsWith("http"))
+    return <a href={value} target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:underline truncate max-w-xs block text-xs">{value}</a>;
   if (Array.isArray(value)) {
-    if (value.length === 0) return <span className="text-zinc-400 italic">empty</span>;
-    if (typeof value[0] === "string") {
-      return (
-        <div className="flex flex-wrap gap-1">
-          {value.map((v, i) => <span key={i} className="bg-zinc-100 text-zinc-700 text-xs px-2 py-0.5 rounded-full">{String(v)}</span>)}
-        </div>
-      );
-    }
+    if (!value.length) return <span className="text-zinc-600">—</span>;
+    if (typeof value[0] === "string")
+      return <div className="flex flex-wrap gap-1">{value.map((v, i) => <span key={i} className="bg-zinc-800 border border-zinc-700 text-zinc-300 text-xs px-2 py-0.5 rounded-full">{String(v)}</span>)}</div>;
+    return <span className="text-zinc-400 text-xs">{value.length} items</span>;
   }
-  if (typeof value === "string" && value.startsWith("http")) {
-    return <a href={value} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline text-xs truncate max-w-xs block">{value}</a>;
-  }
-  return <span className="text-zinc-800 text-sm">{String(value)}</span>;
+  return <span className="text-zinc-200 text-sm">{String(value)}</span>;
 }
 
-// Render an array of objects as a table
 function DataTable({ rows }: { rows: Record<string, unknown>[] }) {
+  const [sortKey, setSortKey] = useState<string | null>(null);
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
   if (!rows.length) return null;
   const headers = Object.keys(rows[0]);
+
+  const sorted = sortKey
+    ? [...rows].sort((a, b) => {
+        const av = String(a[sortKey] ?? ""), bv = String(b[sortKey] ?? "");
+        return sortDir === "asc" ? av.localeCompare(bv) : bv.localeCompare(av);
+      })
+    : rows;
+
+  function toggleSort(h: string) {
+    if (sortKey === h) setSortDir((d) => d === "asc" ? "desc" : "asc");
+    else { setSortKey(h); setSortDir("asc"); }
+  }
+
   return (
-    <div className="overflow-x-auto rounded-xl border border-zinc-200">
-      <table className="w-full text-sm">
+    <div className="overflow-x-auto rounded-xl border border-zinc-800">
+      <table className="w-full border-collapse text-sm">
         <thead>
-          <tr className="bg-zinc-50 border-b border-zinc-200">
+          <tr className="border-b border-zinc-800">
             {headers.map((h) => (
-              <th key={h} className="text-left px-4 py-2.5 text-xs font-semibold text-zinc-500 uppercase tracking-wide whitespace-nowrap">
+              <th key={h} onClick={() => toggleSort(h)}
+                className="text-left px-4 py-3 text-xs font-semibold text-zinc-500 uppercase tracking-wide whitespace-nowrap cursor-pointer hover:text-zinc-300 select-none bg-zinc-950">
                 {h.replace(/_/g, " ")}
+                {sortKey === h && <span className="ml-1 text-zinc-400">{sortDir === "asc" ? "↑" : "↓"}</span>}
               </th>
             ))}
           </tr>
         </thead>
         <tbody>
-          {rows.map((row, i) => (
-            <tr key={i} className={`border-b border-zinc-100 ${i % 2 === 0 ? "bg-white" : "bg-zinc-50/50"}`}>
+          {sorted.map((row, i) => (
+            <tr key={i} className="border-b border-zinc-800/50 hover:bg-zinc-800/30 transition-colors">
               {headers.map((h) => (
-                <td key={h} className="px-4 py-2.5 align-top max-w-xs">
-                  <ValueCell value={row[h]} />
+                <td key={h} className="px-4 py-3 align-top max-w-xs">
+                  <InlineValue value={row[h]} />
                 </td>
               ))}
             </tr>
@@ -231,87 +189,84 @@ function DataTable({ rows }: { rows: Record<string, unknown>[] }) {
   );
 }
 
-// Render key-value pairs as cards
-function KeyValueCards({ data }: { data: Record<string, unknown> }) {
-  return (
-    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-      {Object.entries(data).map(([key, value]) => (
-        <div key={key} className="bg-white border border-zinc-200 rounded-xl p-4">
-          <p className="text-xs font-semibold text-zinc-400 uppercase tracking-wide mb-1">{key.replace(/_/g, " ")}</p>
-          <ValueCell value={value} />
-        </div>
-      ))}
-    </div>
-  );
-}
+// ── Main component ────────────────────────────────────────────────
 
 export default function ResultDisplay({ result, taskId }: ResultDisplayProps) {
   const cleaned = cleanExtractedData(result.extracted_data);
-  const keys = Object.keys(cleaned);
-
-  // Find the primary data — prefer arrays
-  const arrayEntry = Object.entries(cleaned).find(([, v]) => Array.isArray(v) && (v as unknown[]).length > 0);
-  const primaryArray = arrayEntry ? arrayEntry[1] as Record<string, unknown>[] : null;
-  const primaryKey = arrayEntry?.[0];
-
-  // Scalar fields (non-array, non-object)
-  const scalarData = Object.fromEntries(
-    Object.entries(cleaned).filter(([k, v]) => k !== primaryKey && !Array.isArray(v) && typeof v !== "object")
-  );
-
   const filename = `allora-${taskId.slice(0, 8)}`;
 
+  const scalarEntries = Object.entries(cleaned).filter(([, v]) => !Array.isArray(v) && typeof v !== "object");
+  const arrayEntries = Object.entries(cleaned).filter(([, v]) => Array.isArray(v) && (v as unknown[]).length > 0);
+  const primaryArray = arrayEntries[0]?.[1] as Record<string, unknown>[] | undefined;
+
   return (
-    <div className="space-y-4">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <div className="w-8 h-8 rounded-full bg-green-100 flex items-center justify-center text-base">✅</div>
-          <div>
-            <h3 className="text-sm font-semibold text-zinc-900">Task Completed</h3>
-            <p className="text-xs text-zinc-500">{result.summary}</p>
-          </div>
+    <div className="bg-zinc-950 rounded-xl border border-zinc-800 overflow-hidden">
+      {/* Header bar */}
+      <div className="flex items-center justify-between px-5 py-4 border-b border-zinc-800">
+        <div className="flex items-center gap-3">
+          <div className="w-2 h-2 rounded-full bg-green-400" />
+          <span className="text-sm font-semibold text-white">Task Completed</span>
+          <span className="text-xs text-zinc-500 hidden sm:block">{result.summary}</span>
         </div>
         <div className="flex items-center gap-2">
-          <button
-            onClick={() => downloadCSV(primaryArray ?? cleaned, `${filename}.csv`)}
-            className="text-xs font-medium text-zinc-600 border border-zinc-200 bg-white hover:bg-zinc-50 px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1"
-          >
+          <button onClick={() => downloadCSV(primaryArray ?? cleaned, `${filename}.csv`)}
+            className="text-xs text-zinc-400 hover:text-white border border-zinc-700 hover:border-zinc-500 bg-zinc-900 px-3 py-1.5 rounded-lg transition-colors">
             ↓ CSV
           </button>
-          <button
-            onClick={() => downloadHTML(cleaned, result.summary, `${filename}.html`)}
-            className="text-xs font-medium text-zinc-600 border border-zinc-200 bg-white hover:bg-zinc-50 px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1"
-          >
+          <button onClick={() => downloadHTML(cleaned, result.summary, `${filename}.html`)}
+            className="text-xs text-zinc-400 hover:text-white border border-zinc-700 hover:border-zinc-500 bg-zinc-900 px-3 py-1.5 rounded-lg transition-colors">
             ↓ HTML
           </button>
-          <button
-            onClick={() => downloadJSON(cleaned, `${filename}.json`)}
-            className="text-xs font-medium text-white bg-zinc-900 hover:bg-zinc-700 px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1"
-          >
+          <button onClick={() => downloadJSON(cleaned, `${filename}.json`)}
+            className="text-xs text-white bg-zinc-700 hover:bg-zinc-600 px-3 py-1.5 rounded-lg transition-colors">
             ↓ JSON
           </button>
         </div>
       </div>
 
-      {/* Scalar key-value cards */}
-      {Object.keys(scalarData).length > 0 && (
-        <KeyValueCards data={scalarData} />
-      )}
-
-      {/* Array data as table */}
-      {primaryArray && primaryArray.length > 0 && typeof primaryArray[0] === "object" && (
-        <div>
-          <p className="text-xs font-semibold text-zinc-400 uppercase tracking-wide mb-2">
-            {primaryKey?.replace(/_/g, " ")} · {primaryArray.length} results
-          </p>
-          <DataTable rows={primaryArray} />
+      {/* Scalar fields as compact rows */}
+      {scalarEntries.length > 0 && (
+        <div className="border-b border-zinc-800">
+          {scalarEntries.map(([k, v]) => (
+            <div key={k} className="flex items-start gap-4 px-5 py-3 border-b border-zinc-800/50 last:border-0 hover:bg-zinc-900/50 transition-colors">
+              <span className="text-xs font-semibold text-zinc-500 uppercase tracking-wide w-36 flex-shrink-0 pt-0.5">
+                {k.replace(/_/g, " ")}
+              </span>
+              <div className="flex-1 min-w-0">
+                <InlineValue value={v} />
+              </div>
+            </div>
+          ))}
         </div>
       )}
 
-      {/* Fallback: no structured data */}
-      {keys.length === 0 && (
-        <p className="text-sm text-zinc-400 italic">No structured data extracted.</p>
+      {/* Array tables */}
+      {arrayEntries.map(([k, v]) => {
+        const rows = v as Record<string, unknown>[];
+        return (
+          <div key={k} className="p-5">
+            <div className="flex items-center gap-2 mb-3">
+              <span className="text-xs font-semibold text-zinc-300 uppercase tracking-wide">
+                {k.replace(/_/g, " ")}
+              </span>
+              <span className="bg-zinc-800 border border-zinc-700 text-zinc-400 text-xs px-2 py-0.5 rounded-full">
+                {rows.length}
+              </span>
+            </div>
+            {typeof rows[0] === "object" ? (
+              <DataTable rows={rows} />
+            ) : (
+              <div className="flex flex-wrap gap-2">
+                {rows.map((r, i) => <span key={i} className="bg-zinc-800 border border-zinc-700 text-zinc-300 text-xs px-3 py-1 rounded-full">{String(r)}</span>)}
+              </div>
+            )}
+          </div>
+        );
+      })}
+
+      {/* Empty state */}
+      {scalarEntries.length === 0 && arrayEntries.length === 0 && (
+        <div className="px-5 py-8 text-center text-zinc-600 text-sm">No structured data extracted.</div>
       )}
     </div>
   );
