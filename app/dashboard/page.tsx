@@ -44,19 +44,6 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<string>("all");
 
-  useEffect(() => {
-    const supabase = getSupabase();
-    supabase.auth.getSession().then(async ({ data }) => {
-      setSession(data.session);
-      if (data.session) await loadTasks(data.session);
-    });
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_e, s) => {
-      setSession(s);
-      if (!s) router.push("/");
-    });
-    return () => subscription.unsubscribe();
-  }, []);
-
   async function loadTasks(s: Session) {
     setLoading(true);
     const supabase = getSupabase();
@@ -69,6 +56,20 @@ export default function Dashboard() {
     setTasks((data ?? []) as TaskRecord[]);
     setLoading(false);
   }
+
+  useEffect(() => {
+    const supabase = getSupabase();
+    supabase.auth.getSession().then(async ({ data }) => {
+      setSession(data.session);
+      if (data.session) await loadTasks(data.session);
+    });
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_e, s) => {
+      setSession(s);
+      if (!s) router.push("/");
+    });
+    return () => subscription.unsubscribe();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   async function cancelTask(task_id: string) {
     const supabase = getSupabase();

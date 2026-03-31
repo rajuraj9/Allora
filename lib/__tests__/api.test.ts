@@ -290,7 +290,7 @@ describe("GET /api/task/:id/status", () => {
       },
     ];
 
-    let callCount = 0;
+    const callCount = 0;
     supabaseFromImpl = (table: string) => {
       if (table === "tasks") {
         const chain: Record<string, unknown> = {};

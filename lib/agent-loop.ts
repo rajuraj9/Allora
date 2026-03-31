@@ -22,7 +22,7 @@ import { loadMemoryContext, storeUserData, persistExtractedData } from "./memory
 import { planTask } from "./gemini";
 import type { PlanResponse, EvaluateResponse } from "./gemini";
 import { resolveTask } from "./gemini";
-import { executeStep, executeTask } from "./tinyfish";
+import { executeStep } from "./tinyfish";
 import { requiresSafetyConfirmation } from "./safety";
 import { getSupabaseClient } from "./supabase";
 
