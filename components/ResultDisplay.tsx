@@ -60,6 +60,125 @@ function downloadCSV(data: unknown, filename: string) {
   URL.revokeObjectURL(url);
 }
 
+function downloadHTML(data: Record<string, unknown>, summary: string, filename: string) {
+  const now = new Date().toLocaleString();
+
+  function renderValue(v: unknown): string {
+    if (v === null || v === undefined) return `<span style="color:#9ca3af">—</span>`;
+    if (typeof v === "boolean") return v
+      ? `<span style="color:#16a34a;font-weight:600">✓ Yes</span>`
+      : `<span style="color:#dc2626;font-weight:600">✗ No</span>`;
+    if (typeof v === "string" && v.startsWith("http"))
+      return `<a href="${v}" target="_blank" style="color:#2563eb;text-decoration:underline;word-break:break-all">${v}</a>`;
+    if (Array.isArray(v)) {
+      if (!v.length) return `<span style="color:#9ca3af">—</span>`;
+      if (typeof v[0] === "string")
+        return v.map((s) => `<span style="background:#f3f4f6;border:1px solid #e5e7eb;border-radius:999px;padding:2px 10px;font-size:12px;color:#374151">${s}</span>`).join(" ");
+      return `<pre style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;padding:12px;font-size:12px;overflow:auto">${JSON.stringify(v, null, 2)}</pre>`;
+    }
+    if (typeof v === "object")
+      return `<pre style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;padding:12px;font-size:12px;overflow:auto">${JSON.stringify(v, null, 2)}</pre>`;
+    return `<span style="color:#111827">${String(v)}</span>`;
+  }
+
+  function renderTable(rows: Record<string, unknown>[]): string {
+    if (!rows.length) return "";
+    const headers = Object.keys(rows[0]);
+    const ths = headers.map((h) => `<th style="text-align:left;padding:10px 16px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#6b7280;background:#f9fafb;border-bottom:2px solid #e5e7eb;white-space:nowrap">${h.replace(/_/g, " ")}</th>`).join("");
+    const trs = rows.map((row, i) =>
+      `<tr style="background:${i % 2 === 0 ? "#fff" : "#f9fafb"};border-bottom:1px solid #f3f4f6">
+        ${headers.map((h) => `<td style="padding:10px 16px;vertical-align:top;font-size:13px">${renderValue(row[h])}</td>`).join("")}
+      </tr>`
+    ).join("");
+    return `<div style="overflow-x:auto;border-radius:12px;border:1px solid #e5e7eb;margin-top:8px">
+      <table style="width:100%;border-collapse:collapse"><thead><tr>${ths}</tr></thead><tbody>${trs}</tbody></table>
+    </div>`;
+  }
+
+  function renderSection(key: string, value: unknown): string {
+    const label = key.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+    if (Array.isArray(value) && value.length > 0 && typeof value[0] === "object") {
+      return `<section style="margin-bottom:32px">
+        <h2 style="font-size:15px;font-weight:700;color:#111827;margin:0 0 4px">${label}</h2>
+        <p style="font-size:12px;color:#6b7280;margin:0 0 8px">${value.length} result${value.length !== 1 ? "s" : ""}</p>
+        ${renderTable(value as Record<string, unknown>[])}
+      </section>`;
+    }
+    return `<div style="background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:16px;margin-bottom:12px">
+      <p style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#9ca3af;margin:0 0 6px">${label}</p>
+      <div style="font-size:14px;color:#111827">${renderValue(value)}</div>
+    </div>`;
+  }
+
+  const scalarEntries = Object.entries(data).filter(([, v]) => !Array.isArray(v) && typeof v !== "object");
+  const arrayEntries = Object.entries(data).filter(([, v]) => Array.isArray(v));
+  const objectEntries = Object.entries(data).filter(([, v]) => !Array.isArray(v) && typeof v === "object" && v !== null);
+
+  const scalarGrid = scalarEntries.length > 0
+    ? `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px;margin-bottom:32px">
+        ${scalarEntries.map(([k, v]) => renderSection(k, v)).join("")}
+      </div>`
+    : "";
+
+  const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Allora AI — Results</title>
+<style>
+  *{box-sizing:border-box}
+  body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#f9fafb;color:#111827;margin:0;padding:0}
+  a{color:#2563eb}
+</style>
+</head>
+<body>
+<div style="max-width:960px;margin:0 auto;padding:40px 24px">
+  <!-- Header -->
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:32px;padding-bottom:24px;border-bottom:2px solid #e5e7eb">
+    <div style="display:flex;align-items:center;gap:12px">
+      <div style="width:36px;height:36px;background:#111827;border-radius:8px;display:flex;align-items:center;justify-content:center;color:#fff;font-size:16px">✦</div>
+      <div>
+        <h1 style="font-size:20px;font-weight:800;color:#111827;margin:0">Allora AI</h1>
+        <p style="font-size:12px;color:#6b7280;margin:0">Autonomous Web Agent</p>
+      </div>
+    </div>
+    <div style="text-align:right">
+      <p style="font-size:12px;color:#6b7280;margin:0">Generated</p>
+      <p style="font-size:13px;font-weight:600;color:#374151;margin:0">${now}</p>
+    </div>
+  </div>
+
+  <!-- Summary -->
+  <div style="background:#ecfdf5;border:1px solid #bbf7d0;border-radius:12px;padding:16px 20px;margin-bottom:32px;display:flex;align-items:center;gap:12px">
+    <span style="font-size:20px">✅</span>
+    <p style="font-size:14px;color:#166534;font-weight:500;margin:0">${summary}</p>
+  </div>
+
+  <!-- Scalar cards grid -->
+  ${scalarGrid}
+
+  <!-- Array tables -->
+  ${arrayEntries.map(([k, v]) => renderSection(k, v)).join("")}
+
+  <!-- Object sections -->
+  ${objectEntries.map(([k, v]) => renderSection(k, v)).join("")}
+
+  <!-- Footer -->
+  <div style="margin-top:48px;padding-top:24px;border-top:1px solid #e5e7eb;text-align:center">
+    <p style="font-size:12px;color:#9ca3af">Generated by <strong>Allora AI</strong> · alloraai.vercel.app</p>
+  </div>
+</div>
+</body>
+</html>`;
+
+  const blob = new Blob([html], { type: "text/html" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = filename; a.click();
+  URL.revokeObjectURL(url);
+}
+
 // Render a single value nicely
 function ValueCell({ value }: { value: unknown }) {
   if (value === null || value === undefined) return <span className="text-zinc-400 italic">—</span>;
@@ -159,6 +278,12 @@ export default function ResultDisplay({ result, taskId }: ResultDisplayProps) {
             className="text-xs font-medium text-zinc-600 border border-zinc-200 bg-white hover:bg-zinc-50 px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1"
           >
             ↓ CSV
+          </button>
+          <button
+            onClick={() => downloadHTML(cleaned, result.summary, `${filename}.html`)}
+            className="text-xs font-medium text-zinc-600 border border-zinc-200 bg-white hover:bg-zinc-50 px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1"
+          >
+            ↓ HTML
           </button>
           <button
             onClick={() => downloadJSON(cleaned, `${filename}.json`)}
