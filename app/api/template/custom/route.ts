@@ -52,7 +52,6 @@ export async function POST(request: Request) {
   };
 
   if (!title?.trim()) return NextResponse.json({ error: "Title required" }, { status: 400 });
-  if (!url?.trim()) return NextResponse.json({ error: "Starting URL required" }, { status: 400 });
   if (!prompt?.trim()) return NextResponse.json({ error: "Prompt required" }, { status: 400 });
 
   const validationError = validatePrompt(prompt);
