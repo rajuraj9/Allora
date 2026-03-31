@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { createClient } from "@supabase/supabase-js";
 import type { Session } from "@supabase/supabase-js";
@@ -89,7 +89,7 @@ function AuthModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: () 
 }
 
 // ── Main Page ─────────────────────────────────────────────────────
-export default function Home() {
+function HomeInner() {
   const searchParams = useSearchParams();
   const [session, setSession] = useState<Session | null | undefined>(undefined);
   const [taskId, setTaskId] = useState<string | null>(searchParams.get("task_id"));
@@ -365,5 +365,17 @@ export default function Home() {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function Home() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen bg-zinc-950 flex items-center justify-center">
+        <div className="w-5 h-5 border-2 border-white/20 border-t-white rounded-full animate-spin" />
+      </div>
+    }>
+      <HomeInner />
+    </Suspense>
   );
 }
