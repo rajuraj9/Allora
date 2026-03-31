@@ -6,6 +6,7 @@ interface TemplateCardProps {
   template: Template;
   onSelect: (template: Template) => void;
   isRecent?: boolean;
+  isCustom?: boolean;
 }
 
 const categoryColors: Record<string, string> = {
@@ -15,7 +16,7 @@ const categoryColors: Record<string, string> = {
   Utility:    "bg-green-400/10 text-green-400",
 };
 
-export default function TemplateCard({ template, onSelect, isRecent }: TemplateCardProps) {
+export default function TemplateCard({ template, onSelect, isRecent, isCustom }: TemplateCardProps) {
   return (
     <button
       onClick={() => onSelect(template)}
@@ -23,18 +24,23 @@ export default function TemplateCard({ template, onSelect, isRecent }: TemplateC
     >
       <div className="flex items-start justify-between gap-2">
         <span className="text-2xl">{template.icon}</span>
-        <div className="flex items-center gap-1.5">
+        <div className="flex items-center gap-1.5 flex-wrap justify-end">
+          {isCustom && (
+            <span className="text-xs font-medium px-1.5 py-0.5 rounded-full bg-purple-500/20 text-purple-400">
+              My Template
+            </span>
+          )}
           {isRecent && (
             <span className="text-xs bg-white/10 text-zinc-400 px-1.5 py-0.5 rounded-full">Recent</span>
           )}
-          <span className={`text-xs font-medium px-1.5 py-0.5 rounded-full ${categoryColors[template.category]}`}>
-            {template.category}
-          </span>
+          {!isCustom && (
+            <span className={`text-xs font-medium px-1.5 py-0.5 rounded-full ${categoryColors[template.category]}`}>
+              {template.category}
+            </span>
+          )}
         </div>
       </div>
-      <h3 className="mt-2 text-sm font-semibold text-white">
-        {template.title}
-      </h3>
+      <h3 className="mt-2 text-sm font-semibold text-white">{template.title}</h3>
       <p className="mt-1 text-xs text-zinc-500 line-clamp-2">{template.description}</p>
       <div className="mt-3 flex items-center gap-3 text-xs text-zinc-600">
         <span>⏱ {template.estimatedTime}</span>

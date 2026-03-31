@@ -13,7 +13,49 @@ function getSupabase() {
   return createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!);
 }
 
+interface CustomTemplate {
+  id: string;
+  title: string;
+  description: string;
+  prompt: string;
+  fields: Array<{ key: string; label: string; placeholder: string; type: string; required: boolean; options?: string[] }>;
+  created_at: string;
+}
+
+// Convert a custom template to the Template interface shape
+function toTemplate(ct: CustomTemplate): Template & { isCustom: true } {
+  return {
+    id: `custom_${ct.id}`,
+    title: ct.title,
+    description: ct.description || "Custom automation template",
+    category: "Utility",
+    icon: "⚙️",
+    estimatedTime: "~60s",
+    isCustom: true,
+    fields: ct.fields.map((f) => ({
+      key: f.key,
+      label: f.label,
+      placeholder: f.placeholder || "",
+      required: f.required,
+      type: (f.type as "text" | "url" | "email" | "select") || "text",
+      options: f.options,
+    })),
+    buildGoal: (inputs: Record<string, string>) => {
+      // Replace {{field_key}} placeholders with actual values
+      let goal = ct.prompt;
+      for (const [k, v] of Object.entries(inputs)) {
+        goal = goal.replace(new RegExp(`\\{\\{${k}\\}\\}`, "g"), v);
+      }
+      // Use url field as starting URL if present
+      const url = inputs.url || inputs.website || inputs.link || "https://www.google.com";
+      return { url, goal };
+    },
+    expectedOutputSchema: { result: "JSON object or array" },
+  };
+}
+
 type View = "hub" | "run" | "build";
+const ALL_CATEGORIES = ["All", "Mine", ...TEMPLATE_CATEGORIES.filter((c) => c !== "All")] as const;
 
 export default function TemplateHub() {
   const router = useRouter();
@@ -24,15 +66,31 @@ export default function TemplateHub() {
   const [category, setCategory] = useState<string>("All");
   const [loading, setLoading] = useState(false);
   const [recentIds, setRecentIds] = useState<string[]>([]);
+  const [customTemplates, setCustomTemplates] = useState<CustomTemplate[]>([]);
 
   useEffect(() => {
     const stored = JSON.parse(localStorage.getItem("allora_recent_templates") ?? "[]");
     setRecentIds(stored);
     const supabase = getSupabase();
-    supabase.auth.getSession().then(({ data }) => setSession(data.session));
+    supabase.auth.getSession().then(({ data }) => {
+      setSession(data.session);
+      if (data.session) fetchCustomTemplates(data.session.access_token);
+    });
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_e, s) => setSession(s));
     return () => subscription.unsubscribe();
   }, []);
+
+  async function fetchCustomTemplates(token: string) {
+    try {
+      const res = await fetch("/api/template/custom", {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setCustomTemplates(data.templates ?? []);
+      }
+    } catch { /* ignore */ }
+  }
 
   if (session === undefined) {
     return (
@@ -42,6 +100,9 @@ export default function TemplateHub() {
     );
   }
   if (!session) { router.push("/"); return null; }
+
+  const customAsTemplates = customTemplates.map(toTemplate);
+  const allTemplates = [...TEMPLATES, ...customAsTemplates];
 
   function handleSelectTemplate(template: Template) {
     setSelected(template);
@@ -56,10 +117,17 @@ export default function TemplateHub() {
     if (!selected) return;
     setLoading(true);
     try {
-      const res = await fetch("/api/template", {
+      // Custom templates run via the regular task API with the built goal
+      const isCustom = selected.id.startsWith("custom_");
+      const endpoint = isCustom ? "/api/task" : "/api/template";
+      const body = isCustom
+        ? { goal: selected.buildGoal(inputs).goal }
+        : { template_id: selected.id, inputs };
+
+      const res = await fetch(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${session!.access_token}` },
-        body: JSON.stringify({ template_id: selected.id, inputs }),
+        body: JSON.stringify(body),
       });
       const data = await res.json();
       if (res.ok && data.task_id) {
@@ -70,13 +138,16 @@ export default function TemplateHub() {
     }
   }
 
-  const filtered = TEMPLATES.filter((t) => {
-    const matchesCategory = category === "All" || t.category === category;
-    const matchesSearch = !search || t.title.toLowerCase().includes(search.toLowerCase()) || t.description.toLowerCase().includes(search.toLowerCase());
-    return matchesCategory && matchesSearch;
+  const filtered = allTemplates.filter((t) => {
+    const isCustom = t.id.startsWith("custom_");
+    if (category === "Mine") return isCustom;
+    if (category !== "All" && !isCustom && t.category !== category) return false;
+    if (category !== "All" && isCustom && category !== "Mine") return false;
+    if (search) return t.title.toLowerCase().includes(search.toLowerCase()) || t.description.toLowerCase().includes(search.toLowerCase());
+    return true;
   });
 
-  const recentTemplates = TEMPLATES.filter((t) => recentIds.includes(t.id));
+  const recentTemplates = allTemplates.filter((t) => recentIds.includes(t.id));
 
   return (
     <div className="min-h-screen bg-zinc-950 text-white">
@@ -108,33 +179,29 @@ export default function TemplateHub() {
 
             {/* Search + create */}
             <div className="flex items-center gap-3 mb-6">
-              <input
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
+              <input value={search} onChange={(e) => setSearch(e.target.value)}
                 placeholder="Search templates…"
-                className="flex-1 bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white placeholder-zinc-600 focus:outline-none focus:ring-1 focus:ring-white/20"
-              />
-              <button
-                onClick={() => setView("build")}
-                className="bg-white text-zinc-900 text-sm font-semibold px-4 py-2 rounded-lg hover:bg-zinc-100 transition-colors whitespace-nowrap"
-              >
+                className="flex-1 bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white placeholder-zinc-600 focus:outline-none focus:ring-1 focus:ring-white/20" />
+              <button onClick={() => setView("build")}
+                className="bg-white text-zinc-900 text-sm font-semibold px-4 py-2 rounded-lg hover:bg-zinc-100 transition-colors whitespace-nowrap">
                 + Create
               </button>
             </div>
 
             {/* Category tabs */}
             <div className="flex items-center gap-2 mb-6 overflow-x-auto pb-1">
-              {TEMPLATE_CATEGORIES.map((cat) => (
-                <button
-                  key={cat}
-                  onClick={() => setCategory(cat)}
-                  className={`text-xs font-medium px-3 py-1.5 rounded-full whitespace-nowrap transition-colors ${
-                    category === cat
-                      ? "bg-white text-zinc-900"
-                      : "bg-white/5 border border-white/10 text-zinc-400 hover:text-white"
-                  }`}
-                >
+              {ALL_CATEGORIES.map((cat) => (
+                <button key={cat} onClick={() => setCategory(cat)}
+                  className={`text-xs font-medium px-3 py-1.5 rounded-full whitespace-nowrap transition-colors flex items-center gap-1.5 ${
+                    category === cat ? "bg-white text-zinc-900" : "bg-white/5 border border-white/10 text-zinc-400 hover:text-white"
+                  }`}>
+                  {cat === "Mine" && <span className="text-purple-400">⚙</span>}
                   {cat}
+                  {cat === "Mine" && customTemplates.length > 0 && (
+                    <span className={`text-xs px-1.5 py-0.5 rounded-full ${category === "Mine" ? "bg-zinc-800 text-zinc-400" : "bg-purple-500/20 text-purple-400"}`}>
+                      {customTemplates.length}
+                    </span>
+                  )}
                 </button>
               ))}
             </div>
@@ -151,25 +218,45 @@ export default function TemplateHub() {
               </div>
             )}
 
+            {/* My Templates section */}
+            {category === "All" && !search && customTemplates.length > 0 && (
+              <div className="mb-8">
+                <h2 className="text-xs font-semibold text-zinc-500 uppercase tracking-wide mb-3 flex items-center gap-2">
+                  My Templates
+                  <span className="bg-purple-500/20 text-purple-400 text-xs px-1.5 py-0.5 rounded-full">{customTemplates.length}</span>
+                </h2>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                  {customAsTemplates.map((t) => (
+                    <TemplateCard key={t.id} template={t} onSelect={handleSelectTemplate} isCustom />
+                  ))}
+                </div>
+              </div>
+            )}
+
             {/* Grid */}
             {filtered.length > 0 ? (
               <>
                 <h2 className="text-xs font-semibold text-zinc-500 uppercase tracking-wide mb-3">
-                  {category === "All" ? "All Templates" : category} · {filtered.length}
+                  {category === "Mine" ? "My Templates" : category === "All" ? "All Templates" : category} · {filtered.length}
                 </h2>
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
                   {filtered.map((t) => (
-                    <TemplateCard key={t.id} template={t} onSelect={handleSelectTemplate} />
+                    <TemplateCard key={t.id} template={t} onSelect={handleSelectTemplate}
+                      isCustom={t.id.startsWith("custom_")} />
                   ))}
                 </div>
               </>
             ) : (
               <div className="text-center py-20">
-                <p className="text-4xl mb-4">🔍</p>
-                <p className="text-zinc-400 font-medium">No templates found</p>
-                <p className="text-zinc-600 text-sm mt-1">Try a different search or create your own</p>
+                <p className="text-4xl mb-4">{category === "Mine" ? "⚙️" : "🔍"}</p>
+                <p className="text-zinc-400 font-medium">
+                  {category === "Mine" ? "No custom templates yet" : "No templates found"}
+                </p>
+                <p className="text-zinc-600 text-sm mt-1">
+                  {category === "Mine" ? "Create your first template" : "Try a different search or create your own"}
+                </p>
                 <button onClick={() => setView("build")} className="mt-4 text-sm text-white underline">
-                  Create a custom template
+                  Create a template
                 </button>
               </div>
             )}
@@ -177,21 +264,18 @@ export default function TemplateHub() {
         )}
 
         {view === "run" && selected && (
-          <TemplateRunForm
-            template={selected}
-            onSubmit={handleRunTemplate}
-            onBack={() => setView("hub")}
-            loading={loading}
-            token={session.access_token}
-          />
+          <TemplateRunForm template={selected} onSubmit={handleRunTemplate} onBack={() => setView("hub")}
+            loading={loading} token={session.access_token} />
         )}
 
         {view === "build" && (
-          <CustomTemplateBuilder
-            onBack={() => setView("hub")}
-            onCreated={() => setView("hub")}
-            token={session.access_token}
-          />
+          <CustomTemplateBuilder onBack={() => setView("hub")}
+            onCreated={() => {
+              fetchCustomTemplates(session.access_token);
+              setView("hub");
+              setCategory("Mine");
+            }}
+            token={session.access_token} />
         )}
       </div>
     </div>

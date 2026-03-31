@@ -18,7 +18,8 @@ export interface Template {
   description: string;
   category: "Research" | "Actions" | "Monitoring" | "Utility";
   icon: string;
-  estimatedTime: string; // e.g. "~45s"
+  estimatedTime: string;
+  isCustom?: boolean;
   fields: TemplateField[];
   buildGoal: (inputs: Record<string, string>) => { url: string; goal: string };
   expectedOutputSchema: Record<string, string>;
