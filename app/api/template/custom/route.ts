@@ -62,7 +62,7 @@ export async function POST(request: Request) {
     user_id: auth.user_id,
     title: title.trim(),
     description: description?.trim() ?? "",
-    url: url.trim(),
+    url: url?.trim() ?? "",
     prompt: prompt.trim(),
     fields: fields ?? [],
     created_at: new Date().toISOString(),
