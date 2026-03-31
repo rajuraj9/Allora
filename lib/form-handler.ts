@@ -69,7 +69,7 @@ export function buildFormFillPlan(
       continue;
     }
 
-    const profile = memory_context.user_profile as Record<string, unknown>;
+    const profile = memory_context.user_profile as unknown as Record<string, unknown>;
     if (Object.prototype.hasOwnProperty.call(profile, field.name)) {
       const profileValue = profile[field.name];
       if (profileValue !== undefined && profileValue !== null) {
