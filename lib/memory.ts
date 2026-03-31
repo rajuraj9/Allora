@@ -89,7 +89,7 @@ export async function loadMemoryContext(
       .maybeSingle();
 
     const rawProfile: Record<string, unknown> = profileRow ?? { user_id };
-    const safeProfile = stripSensitiveFields(rawProfile) as UserProfile;
+    const safeProfile = stripSensitiveFields(rawProfile) as unknown as UserProfile;
     // Ensure user_id is always present
     safeProfile.user_id = user_id;
 
