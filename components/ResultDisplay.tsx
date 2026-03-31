@@ -17,14 +17,21 @@ function parseCleanData(raw: unknown): unknown {
 }
 
 function cleanExtractedData(data: Record<string, unknown>): Record<string, unknown> {
+  // First try to unwrap a top-level "result" string that contains JSON
+  if (data.result && typeof data.result === "string") {
+    const parsed = parseCleanData(data.result);
+    if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
+      return cleanExtractedData(parsed as Record<string, unknown>);
+    }
+    if (Array.isArray(parsed)) {
+      return { items: parsed };
+    }
+  }
+
   const cleaned: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(data)) {
     if (k.startsWith("_")) continue;
     cleaned[k] = parseCleanData(v);
-  }
-  if (cleaned.result && typeof cleaned.result === "string") {
-    const parsed = parseCleanData(cleaned.result);
-    if (typeof parsed === "object" && parsed !== null) return parsed as Record<string, unknown>;
   }
   return cleaned;
 }
@@ -53,6 +60,74 @@ function downloadCSV(data: unknown, filename: string) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a"); a.href = url; a.download = filename; a.click();
   URL.revokeObjectURL(url);
+}
+
+function buildHTML(data: Record<string, unknown>, summary: string): string {
+  const now = new Date().toLocaleString();
+
+  function rv(v: unknown): string {
+    if (v === null || v === undefined) return `<span style="color:#6b7280">—</span>`;
+    if (typeof v === "boolean") return v ? `<span style="color:#4ade80;font-weight:600">✓ Yes</span>` : `<span style="color:#f87171;font-weight:600">✗ No</span>`;
+    if (typeof v === "string" && v.startsWith("http")) return `<a href="${v}" target="_blank" style="color:#60a5fa;text-decoration:underline;word-break:break-all">${v}</a>`;
+    if (Array.isArray(v)) {
+      if (!v.length) return `<span style="color:#6b7280">—</span>`;
+      if (typeof v[0] === "string") return v.map((s) => `<span style="background:#1f2937;border:1px solid #374151;border-radius:999px;padding:2px 10px;font-size:11px;color:#d1d5db;display:inline-block;margin:2px">${s}</span>`).join("");
+      return `<pre style="background:#111827;border:1px solid #374151;border-radius:6px;padding:10px;font-size:11px;color:#d1d5db;overflow:auto;margin:0">${JSON.stringify(v, null, 2)}</pre>`;
+    }
+    if (typeof v === "object") return `<pre style="background:#111827;border:1px solid #374151;border-radius:6px;padding:10px;font-size:11px;color:#d1d5db;overflow:auto;margin:0">${JSON.stringify(v, null, 2)}</pre>`;
+    return `<span style="color:#f9fafb">${String(v)}</span>`;
+  }
+
+  const entries = Object.entries(data);
+  const scalars = entries.filter(([, v]) => !Array.isArray(v) && typeof v !== "object");
+  const arrays = entries.filter(([, v]) => Array.isArray(v) && (v as unknown[]).length > 0);
+
+  const scalarHTML = scalars.length > 0 ? `
+    <div style="border:1px solid #21262d;border-radius:10px;overflow:hidden;margin-bottom:24px">
+      ${scalars.map(([k, v], i) => `
+        <div style="display:flex;align-items:flex-start;gap:16px;padding:12px 16px;background:${i % 2 === 0 ? "#0d1117" : "#111827"};border-bottom:1px solid #21262d">
+          <span style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#6b7280;width:160px;flex-shrink:0;padding-top:2px">${k.replace(/_/g, " ")}</span>
+          <div style="flex:1;font-size:13px">${rv(v)}</div>
+        </div>`).join("")}
+    </div>` : "";
+
+  const arrayHTML = arrays.map(([k, v]) => {
+    const rows = v as Record<string, unknown>[];
+    const headers = Object.keys(rows[0] ?? {});
+    return `
+      <div style="margin-bottom:28px">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+          <h2 style="font-size:13px;font-weight:700;color:#f9fafb;margin:0;text-transform:uppercase;letter-spacing:.05em">${k.replace(/_/g, " ")}</h2>
+          <span style="background:#1f2937;border:1px solid #374151;border-radius:999px;padding:1px 8px;font-size:11px;color:#9ca3af">${rows.length}</span>
+        </div>
+        <div style="border:1px solid #21262d;border-radius:10px;overflow:hidden">
+          <table style="width:100%;border-collapse:collapse">
+            <thead><tr>${headers.map((h) => `<th style="text-align:left;padding:10px 14px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#6b7280;background:#111827;border-bottom:1px solid #21262d;white-space:nowrap">${h.replace(/_/g, " ")}</th>`).join("")}</tr></thead>
+            <tbody>${rows.map((row, i) => `<tr style="border-bottom:1px solid #1a1f2e;background:${i % 2 === 0 ? "#0d1117" : "#111827"}">${headers.map((h) => `<td style="padding:10px 14px;font-size:13px;vertical-align:top">${rv(row[h])}</td>`).join("")}</tr>`).join("")}</tbody>
+          </table>
+        </div>
+      </div>`;
+  }).join("");
+
+  return `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Allora AI Report</title></head>
+<body style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#0d1117;color:#f9fafb;margin:0;padding:0">
+<div style="max-width:960px;margin:0 auto;padding:32px 20px">
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:24px;padding-bottom:16px;border-bottom:1px solid #21262d">
+    <div style="display:flex;align-items:center;gap:10px">
+      <div style="width:30px;height:30px;background:#f9fafb;border-radius:7px;display:flex;align-items:center;justify-content:center;color:#0d1117;font-size:13px;font-weight:900">✦</div>
+      <span style="font-size:15px;font-weight:800;color:#f9fafb">Allora AI</span>
+    </div>
+    <span style="font-size:11px;color:#6b7280">${now}</span>
+  </div>
+  <div style="background:#0f2318;border:1px solid #1a4731;border-radius:8px;padding:12px 16px;margin-bottom:24px;display:flex;align-items:center;gap:10px">
+    <span style="color:#4ade80;font-size:14px">✓</span>
+    <span style="font-size:13px;color:#86efac;font-weight:500">${summary}</span>
+  </div>
+  ${scalarHTML}${arrayHTML}
+  <div style="margin-top:32px;padding-top:16px;border-top:1px solid #21262d;text-align:center">
+    <p style="font-size:11px;color:#6b7280;margin:0">Generated by <strong style="color:#9ca3af">Allora AI</strong></p>
+  </div>
+</div></body></html>`;
 }
 
 function downloadHTML(data: Record<string, unknown>, summary: string, filename: string) {
@@ -192,6 +267,7 @@ function DataTable({ rows }: { rows: Record<string, unknown>[] }) {
 // ── Main component ────────────────────────────────────────────────
 
 export default function ResultDisplay({ result, taskId }: ResultDisplayProps) {
+  const [view, setView] = useState<"data" | "preview">("data");
   const cleaned = cleanExtractedData(result.extracted_data);
   const filename = `allora-${taskId.slice(0, 8)}`;
 
@@ -199,23 +275,32 @@ export default function ResultDisplay({ result, taskId }: ResultDisplayProps) {
   const arrayEntries = Object.entries(cleaned).filter(([, v]) => Array.isArray(v) && (v as unknown[]).length > 0);
   const primaryArray = arrayEntries[0]?.[1] as Record<string, unknown>[] | undefined;
 
+  const htmlPreview = buildHTML(cleaned, result.summary);
+
   return (
     <div className="bg-zinc-950 rounded-xl border border-zinc-800 overflow-hidden">
       {/* Header bar */}
-      <div className="flex items-center justify-between px-5 py-4 border-b border-zinc-800">
+      <div className="flex items-center justify-between px-5 py-4 border-b border-zinc-800 flex-wrap gap-2">
         <div className="flex items-center gap-3">
-          <div className="w-2 h-2 rounded-full bg-green-400" />
+          <div className="w-2 h-2 rounded-full bg-green-400 flex-shrink-0" />
           <span className="text-sm font-semibold text-white">Task Completed</span>
-          <span className="text-xs text-zinc-500 hidden sm:block">{result.summary}</span>
+          <span className="text-xs text-zinc-500 hidden sm:block truncate max-w-xs">{result.summary}</span>
         </div>
         <div className="flex items-center gap-2">
+          {/* View toggle */}
+          <div className="flex items-center bg-zinc-900 border border-zinc-700 rounded-lg p-0.5">
+            <button onClick={() => setView("data")}
+              className={`text-xs px-3 py-1.5 rounded-md transition-colors ${view === "data" ? "bg-zinc-700 text-white" : "text-zinc-400 hover:text-white"}`}>
+              Data
+            </button>
+            <button onClick={() => setView("preview")}
+              className={`text-xs px-3 py-1.5 rounded-md transition-colors ${view === "preview" ? "bg-zinc-700 text-white" : "text-zinc-400 hover:text-white"}`}>
+              Preview
+            </button>
+          </div>
           <button onClick={() => downloadCSV(primaryArray ?? cleaned, `${filename}.csv`)}
             className="text-xs text-zinc-400 hover:text-white border border-zinc-700 hover:border-zinc-500 bg-zinc-900 px-3 py-1.5 rounded-lg transition-colors">
             ↓ CSV
-          </button>
-          <button onClick={() => downloadHTML(cleaned, result.summary, `${filename}.html`)}
-            className="text-xs text-zinc-400 hover:text-white border border-zinc-700 hover:border-zinc-500 bg-zinc-900 px-3 py-1.5 rounded-lg transition-colors">
-            ↓ HTML
           </button>
           <button onClick={() => downloadJSON(cleaned, `${filename}.json`)}
             className="text-xs text-white bg-zinc-700 hover:bg-zinc-600 px-3 py-1.5 rounded-lg transition-colors">
@@ -224,49 +309,58 @@ export default function ResultDisplay({ result, taskId }: ResultDisplayProps) {
         </div>
       </div>
 
-      {/* Scalar fields as compact rows */}
-      {scalarEntries.length > 0 && (
-        <div className="border-b border-zinc-800">
-          {scalarEntries.map(([k, v]) => (
-            <div key={k} className="flex items-start gap-4 px-5 py-3 border-b border-zinc-800/50 last:border-0 hover:bg-zinc-900/50 transition-colors">
-              <span className="text-xs font-semibold text-zinc-500 uppercase tracking-wide w-36 flex-shrink-0 pt-0.5">
-                {k.replace(/_/g, " ")}
-              </span>
-              <div className="flex-1 min-w-0">
-                <InlineValue value={v} />
-              </div>
-            </div>
-          ))}
-        </div>
+      {/* HTML Preview via srcdoc iframe */}
+      {view === "preview" && (
+        <iframe
+          srcDoc={htmlPreview}
+          className="w-full border-0"
+          style={{ height: "600px" }}
+          title="Result preview"
+          sandbox="allow-same-origin"
+        />
       )}
 
-      {/* Array tables */}
-      {arrayEntries.map(([k, v]) => {
-        const rows = v as Record<string, unknown>[];
-        return (
-          <div key={k} className="p-5">
-            <div className="flex items-center gap-2 mb-3">
-              <span className="text-xs font-semibold text-zinc-300 uppercase tracking-wide">
-                {k.replace(/_/g, " ")}
-              </span>
-              <span className="bg-zinc-800 border border-zinc-700 text-zinc-400 text-xs px-2 py-0.5 rounded-full">
-                {rows.length}
-              </span>
+      {/* Data view */}
+      {view === "data" && (
+        <>
+          {scalarEntries.length > 0 && (
+            <div className="border-b border-zinc-800">
+              {scalarEntries.map(([k, v]) => (
+                <div key={k} className="flex items-start gap-4 px-5 py-3 border-b border-zinc-800/50 last:border-0 hover:bg-zinc-900/50 transition-colors">
+                  <span className="text-xs font-semibold text-zinc-500 uppercase tracking-wide w-36 flex-shrink-0 pt-0.5">
+                    {k.replace(/_/g, " ")}
+                  </span>
+                  <div className="flex-1 min-w-0"><InlineValue value={v} /></div>
+                </div>
+              ))}
             </div>
-            {typeof rows[0] === "object" ? (
-              <DataTable rows={rows} />
-            ) : (
-              <div className="flex flex-wrap gap-2">
-                {rows.map((r, i) => <span key={i} className="bg-zinc-800 border border-zinc-700 text-zinc-300 text-xs px-3 py-1 rounded-full">{String(r)}</span>)}
-              </div>
-            )}
-          </div>
-        );
-      })}
+          )}
 
-      {/* Empty state */}
-      {scalarEntries.length === 0 && arrayEntries.length === 0 && (
-        <div className="px-5 py-8 text-center text-zinc-600 text-sm">No structured data extracted.</div>
+          {arrayEntries.map(([k, v]) => {
+            const rows = v as Record<string, unknown>[];
+            return (
+              <div key={k} className="p-5">
+                <div className="flex items-center gap-2 mb-3">
+                  <span className="text-xs font-semibold text-zinc-300 uppercase tracking-wide">{k.replace(/_/g, " ")}</span>
+                  <span className="bg-zinc-800 border border-zinc-700 text-zinc-400 text-xs px-2 py-0.5 rounded-full">{rows.length}</span>
+                </div>
+                {typeof rows[0] === "object"
+                  ? <DataTable rows={rows} />
+                  : <div className="flex flex-wrap gap-2">{rows.map((r, i) => <span key={i} className="bg-zinc-800 border border-zinc-700 text-zinc-300 text-xs px-3 py-1 rounded-full">{String(r)}</span>)}</div>
+                }
+              </div>
+            );
+          })}
+
+          {scalarEntries.length === 0 && arrayEntries.length === 0 && (
+            <div className="px-5 py-8 text-center">
+              <p className="text-zinc-500 text-sm mb-3">Raw output</p>
+              <pre className="text-xs text-zinc-400 text-left bg-zinc-900 rounded-lg p-4 overflow-auto max-h-64">
+                {JSON.stringify(result.extracted_data, null, 2)}
+              </pre>
+            </div>
+          )}
+        </>
       )}
     </div>
   );
