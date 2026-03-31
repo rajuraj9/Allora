@@ -38,6 +38,7 @@ export default function CustomTemplateBuilder({ onBack, onCreated, token }: Cust
   // Step 3 — prompt
   const [prompt, setPrompt] = useState("");
   const [saving, setSaving] = useState(false);
+  const [generatingPrompt, setGeneratingPrompt] = useState(false);
   const [error, setError] = useState("");
 
   // ── Field management ──────────────────────────────────────────
@@ -60,6 +61,32 @@ export default function CustomTemplateBuilder({ onBack, onCreated, token }: Cust
       }
       return updated;
     }));
+  }
+
+  // ── Generate prompt with AI ───────────────────────────────────
+
+  async function handleGeneratePrompt() {
+    setGeneratingPrompt(true);
+    try {
+      const res = await fetch("/api/template/generate-prompt", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          title,
+          description,
+          fields: fields.filter((f) => f.label).map((f) => ({
+            key: f.key || slugify(f.label),
+            label: f.label,
+            type: f.type,
+            required: f.required,
+          })),
+        }),
+      });
+      const data = await res.json();
+      if (data.prompt) setPrompt(data.prompt);
+    } finally {
+      setGeneratingPrompt(false);
+    }
   }
 
   // ── Save ──────────────────────────────────────────────────────
@@ -229,7 +256,10 @@ export default function CustomTemplateBuilder({ onBack, onCreated, token }: Cust
             <p className="text-xs font-semibold text-zinc-400 mb-2">Your fields — use these in the prompt with {`{{field_key}}`}</p>
             <div className="flex flex-wrap gap-2">
               {fields.filter((f) => f.label).map((f) => (
-                <code key={f.key} className="text-xs bg-zinc-800 border border-zinc-700 text-zinc-300 px-2 py-1 rounded">
+                <code key={f.key}
+                  onClick={() => setPrompt((p) => p + `{{${f.key || slugify(f.label)}}}`)}
+                  className="text-xs bg-zinc-800 border border-zinc-700 text-zinc-300 px-2 py-1 rounded cursor-pointer hover:bg-zinc-700 transition-colors"
+                  title="Click to insert">
                   {`{{${f.key || slugify(f.label)}}}`}
                 </code>
               ))}
@@ -237,7 +267,20 @@ export default function CustomTemplateBuilder({ onBack, onCreated, token }: Cust
           </div>
 
           <div>
-            <label className="block text-xs font-medium text-zinc-300 mb-1">Automation Prompt *</label>
+            <div className="flex items-center justify-between mb-1">
+              <label className="text-xs font-medium text-zinc-300">Automation Prompt *</label>
+              <button
+                onClick={handleGeneratePrompt}
+                disabled={generatingPrompt}
+                className="flex items-center gap-1.5 text-xs bg-white/10 hover:bg-white/15 border border-white/10 text-zinc-300 hover:text-white px-3 py-1.5 rounded-lg transition-colors disabled:opacity-50"
+              >
+                {generatingPrompt ? (
+                  <><span className="animate-spin inline-block">⟳</span> Generating…</>
+                ) : (
+                  <>✦ Generate with AI</>
+                )}
+              </button>
+            </div>
             <textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} rows={8}
               placeholder={`Describe what to do. Use {{field_key}} to reference user inputs.\n\ne.g. Visit {{url}} and extract all product names, prices, and ratings. Return as JSON array with keys: name, price, rating.`}
               className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white placeholder-zinc-600 focus:outline-none focus:ring-1 focus:ring-white/20 resize-none" />
