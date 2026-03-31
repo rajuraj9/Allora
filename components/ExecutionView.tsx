@@ -7,6 +7,7 @@ import StepLogItem from "./StepLogItem";
 import UserInputForm from "./UserInputForm";
 import SafetyConfirmationDialog from "./SafetyConfirmationDialog";
 import FailureDisplay from "./FailureDisplay";
+import ResultDisplay from "./ResultDisplay";
 
 interface ExecutionViewProps {
   task_id: string;
@@ -212,20 +213,8 @@ export default function ExecutionView({
 
       {/* Completed result */}
       {status === "completed" && result && (
-        <div className="rounded-lg border border-green-200 bg-green-50 p-4 space-y-2">
-          <div className="flex items-center gap-2">
-            <span className="text-green-600 text-lg">✅</span>
-            <h3 className="text-sm font-semibold text-green-800">Task Completed</h3>
-          </div>
-          <p className="text-sm text-green-700">{result.summary}</p>
-          {Object.keys(result.extracted_data).length > 0 && (
-            <div className="mt-2">
-              <p className="text-xs font-medium text-green-700 mb-1">Extracted Data</p>
-              <pre className="text-xs bg-green-100 rounded p-2 overflow-auto text-green-900">
-                {JSON.stringify(result.extracted_data, null, 2)}
-              </pre>
-            </div>
-          )}
+        <div className="rounded-xl border border-zinc-200 bg-white p-5">
+          <ResultDisplay result={result} taskId={task_id} />
         </div>
       )}
     </div>
