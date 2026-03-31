@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { TaskResult } from "@/lib/types";
 
 interface ResultDisplayProps {
@@ -71,7 +71,7 @@ function buildHTML(data: Record<string, unknown>, summary: string): string {
     if (typeof v === "string" && v.startsWith("http")) return `<a href="${v}" target="_blank" style="color:#60a5fa;text-decoration:underline;word-break:break-all">${v}</a>`;
     if (Array.isArray(v)) {
       if (!v.length) return `<span style="color:#6b7280">—</span>`;
-      if (typeof v[0] === "string") return v.map((s) => `<span style="background:#1f2937;border:1px solid #374151;border-radius:999px;padding:2px 10px;font-size:11px;color:#d1d5db;display:inline-block;margin:2px">${s}</span>`).join("");
+      if (typeof v[0] === "string") return v.map((s) => `<span style="background:#1f2937;border:1px solid #374151;border-radius:999px;padding:2px 10px;font-size:11px;color:#d1d5db;display:inline-block;margin:2px">${String(s)}</span>`).join("");
       return `<pre style="background:#111827;border:1px solid #374151;border-radius:6px;padding:10px;font-size:11px;color:#d1d5db;overflow:auto;margin:0">${JSON.stringify(v, null, 2)}</pre>`;
     }
     if (typeof v === "object") return `<pre style="background:#111827;border:1px solid #374151;border-radius:6px;padding:10px;font-size:11px;color:#d1d5db;overflow:auto;margin:0">${JSON.stringify(v, null, 2)}</pre>`;
@@ -268,6 +268,7 @@ function DataTable({ rows }: { rows: Record<string, unknown>[] }) {
 
 export default function ResultDisplay({ result, taskId }: ResultDisplayProps) {
   const [view, setView] = useState<"data" | "preview">("data");
+  const [copied, setCopied] = useState(false);
   const cleaned = cleanExtractedData(result.extracted_data);
   const filename = `allora-${taskId.slice(0, 8)}`;
 
@@ -275,7 +276,16 @@ export default function ResultDisplay({ result, taskId }: ResultDisplayProps) {
   const arrayEntries = Object.entries(cleaned).filter(([, v]) => Array.isArray(v) && (v as unknown[]).length > 0);
   const primaryArray = arrayEntries[0]?.[1] as Record<string, unknown>[] | undefined;
 
-  const htmlPreview = buildHTML(cleaned, result.summary);
+  // Memoize so the iframe doesn't re-render on every poll
+  const htmlPreview = useMemo(() => buildHTML(cleaned, result.summary), [JSON.stringify(cleaned), result.summary]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  function handleCopy() {
+    const text = JSON.stringify(cleaned, null, 2);
+    navigator.clipboard.writeText(text).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  }
 
   return (
     <div className="bg-zinc-950 rounded-xl border border-zinc-800 overflow-hidden">
@@ -298,6 +308,16 @@ export default function ResultDisplay({ result, taskId }: ResultDisplayProps) {
               Preview
             </button>
           </div>
+          {/* Copy button */}
+          <button onClick={handleCopy}
+            title="Copy as JSON"
+            className="text-xs text-zinc-400 hover:text-white border border-zinc-700 hover:border-zinc-500 bg-zinc-900 px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1.5">
+            {copied ? (
+              <><span className="text-green-400">✓</span> Copied</>
+            ) : (
+              <><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg> Copy</>
+            )}
+          </button>
           <button onClick={() => downloadCSV(primaryArray ?? cleaned, `${filename}.csv`)}
             className="text-xs text-zinc-400 hover:text-white border border-zinc-700 hover:border-zinc-500 bg-zinc-900 px-3 py-1.5 rounded-lg transition-colors">
             ↓ CSV
